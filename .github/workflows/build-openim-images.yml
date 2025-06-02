@@ -12,6 +12,14 @@ on:
         description: 'OpenIM Chat版本标签 (如: v1.7.0)'
         required: true
         default: 'v1.7.0'
+      openim_web_tag:
+        description: 'OpenIM Web版本标签 (如: v3.8.0)'
+        required: true
+        default: 'v3.8.0'
+      openim_admin_tag:
+        description: 'OpenIM Admin版本标签 (如: v1.7.0)'
+        required: true
+        default: 'v1.7.0'
       force_rebuild:
         description: '强制重新构建所有镜像'
         type: boolean
@@ -39,8 +47,6 @@ env:
   # OpenIM官方仓库
   OPENIM_SERVER_REPO: openimsdk/open-im-server
   OPENIM_CHAT_REPO: openimsdk/chat
-  OPENIM_WEB_REPO: openimsdk/openim-web
-  OPENIM_ADMIN_REPO: openimsdk/openim-admin
 
 jobs:
   check-updates:
@@ -48,8 +54,6 @@ jobs:
     outputs:
       server_version: ${{ steps.check.outputs.server_version }}
       chat_version: ${{ steps.check.outputs.chat_version }}
-      web_version: ${{ steps.check.outputs.web_version }}
-      admin_version: ${{ steps.check.outputs.admin_version }}
       should_build: ${{ steps.check.outputs.should_build }}
     steps:
       - name: Checkout代码
@@ -63,8 +67,6 @@ jobs:
           # 获取最新版本，如果失败则使用默认版本
           SERVER_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_SERVER_REPO}/releases/latest | jq -r .tag_name)
           CHAT_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_CHAT_REPO}/releases/latest | jq -r .tag_name)
-          WEB_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_WEB_REPO}/releases/latest | jq -r .tag_name)
-          ADMIN_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_ADMIN_REPO}/releases/latest | jq -r .tag_name)
           
           # 检查获取的版本是否有效，如果无效则使用默认版本
           if [[ "$SERVER_LATEST" == "null" || -z "$SERVER_LATEST" ]]; then
@@ -73,17 +75,9 @@ jobs:
           if [[ "$CHAT_LATEST" == "null" || -z "$CHAT_LATEST" ]]; then
             CHAT_LATEST="v1.7.0"
           fi
-          if [[ "$WEB_LATEST" == "null" || -z "$WEB_LATEST" ]]; then
-            WEB_LATEST="v3.8.0"
-          fi
-          if [[ "$ADMIN_LATEST" == "null" || -z "$ADMIN_LATEST" ]]; then
-            ADMIN_LATEST="v1.7.0"
-          fi
           
           echo "server_version=${SERVER_LATEST}" >> $GITHUB_OUTPUT
           echo "chat_version=${CHAT_LATEST}" >> $GITHUB_OUTPUT
-          echo "web_version=${WEB_LATEST}" >> $GITHUB_OUTPUT
-          echo "admin_version=${ADMIN_LATEST}" >> $GITHUB_OUTPUT
           
           # 检查是否需要构建
           SHOULD_BUILD=false
@@ -102,21 +96,15 @@ jobs:
           if [[ ! -f versions.txt ]]; then
             echo "server=" > versions.txt
             echo "chat=" >> versions.txt
-            echo "web=" >> versions.txt
-            echo "admin=" >> versions.txt
             SHOULD_BUILD=true
           fi
           
           # 比较版本
           PREV_SERVER=$(grep "server=" versions.txt | cut -d'=' -f2)
           PREV_CHAT=$(grep "chat=" versions.txt | cut -d'=' -f2)
-          PREV_WEB=$(grep "web=" versions.txt | cut -d'=' -f2)
-          PREV_ADMIN=$(grep "admin=" versions.txt | cut -d'=' -f2)
           
           if [[ "${SERVER_LATEST}" != "${PREV_SERVER}" ]] || \
-             [[ "${CHAT_LATEST}" != "${PREV_CHAT}" ]] || \
-             [[ "${WEB_LATEST}" != "${PREV_WEB}" ]] || \
-             [[ "${ADMIN_LATEST}" != "${PREV_ADMIN}" ]]; then
+             [[ "${CHAT_LATEST}" != "${PREV_CHAT}" ]]; then
             SHOULD_BUILD=true
           fi
           
@@ -125,8 +113,6 @@ jobs:
           echo "检测到的版本:"
           echo "OpenIM Server: ${SERVER_LATEST} (之前: ${PREV_SERVER})"
           echo "OpenIM Chat: ${CHAT_LATEST} (之前: ${PREV_CHAT})"
-          echo "OpenIM Web: ${WEB_LATEST} (之前: ${PREV_WEB})"
-          echo "OpenIM Admin: ${ADMIN_LATEST} (之前: ${PREV_ADMIN})"
           echo "是否需要构建: ${SHOULD_BUILD}"
 
   build-server:
@@ -277,10 +263,13 @@ jobs:
             org.opencontainers.image.version=${{ needs.check-updates.outputs.chat_version }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-  build-web:
+  build-base-images:
     needs: check-updates
     if: needs.check-updates.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [mongodb, redis]
     steps:
       - name: Checkout代码
         uses: actions/checkout@v4
@@ -303,48 +292,36 @@ jobs:
           password: ${{ secrets.ALIYUN_PASSWORD }}
         continue-on-error: true
 
-      - name: 下载OpenIM Web源码
-        run: |
-          # 使用检测到的Web版本
-          WEB_VERSION="${{ needs.check-updates.outputs.web_version }}"
-          
-          echo "使用版本: ${WEB_VERSION}"
-          
-          # 检查版本格式
-          if [[ ! "$WEB_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-            echo "错误: 版本格式不正确: ${WEB_VERSION}"
-            echo "请使用类似 v3.8.0 的格式"
-            exit 1
-          fi
-          
-          # 尝试克隆指定版本
-          if ! git clone --depth 1 --branch ${WEB_VERSION} https://github.com/${OPENIM_WEB_REPO}.git openim-web; then
-            echo "错误: 无法找到版本 ${WEB_VERSION}"
-            echo "正在获取可用的标签..."
-            git ls-remote --tags https://github.com/${OPENIM_WEB_REPO}.git | head -10
-            exit 1
-          fi
-          
-          cp dockerfiles/anolis/Dockerfile.web-front openim-web/Dockerfile
-          cp dockerfiles/anolis/nginx.conf openim-web/nginx.conf
-
-      - name: 构建并推送OpenIM Web镜像
+      - name: 构建并推送${{ matrix.component }}镜像
         uses: docker/build-push-action@v5
         with:
-          context: ./openim-web
-          file: ./openim-web/Dockerfile
+          context: ./dockerfiles/anolis
+          file: ./dockerfiles/anolis/Dockerfile.${{ matrix.component }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-web:${{ needs.check-updates.outputs.web_version }}-anolis
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-web:latest-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-web:${{ needs.check-updates.outputs.web_version }}-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-web:latest-anolis
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component }}:latest-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component }}:latest-anolis
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=${{ matrix.component }} on Anolis OS 8.10
+            org.opencontainers.image.description=${{ matrix.component }} built on Anolis OS 8.10
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-  build-admin:
+  build-web-admin:
     needs: check-updates
     if: needs.check-updates.outputs.should_build == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: 
+          - name: openim-web
+            input_tag: openim_web_tag
+            official_image: openimsdk/openim-web
+          - name: openim-admin
+            input_tag: openim_admin_tag
+            official_image: openimsdk/openim-admin
     steps:
       - name: Checkout代码
         uses: actions/checkout@v4
@@ -367,46 +344,55 @@ jobs:
           password: ${{ secrets.ALIYUN_PASSWORD }}
         continue-on-error: true
 
-      - name: 下载OpenIM Admin源码
+      - name: 重新标签并推送${{ matrix.component.name }}镜像
         run: |
-          # 使用检测到的Admin版本
-          ADMIN_VERSION="${{ needs.check-updates.outputs.admin_version }}"
-          
-          echo "使用版本: ${ADMIN_VERSION}"
-          
-          # 检查版本格式
-          if [[ ! "$ADMIN_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-            echo "错误: 版本格式不正确: ${ADMIN_VERSION}"
-            echo "请使用类似 v1.7.0 的格式"
-            exit 1
+          # 确定要使用的版本
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            case "${{ matrix.component.name }}" in
+              "openim-web")
+                VERSION="${{ github.event.inputs.openim_web_tag }}"
+                ;;
+              "openim-admin")
+                VERSION="${{ github.event.inputs.openim_admin_tag }}"
+                ;;
+              *)
+                VERSION="latest"
+                ;;
+            esac
+          else
+            # 对于定时任务，使用latest标签
+            VERSION="latest"
           fi
           
-          # 尝试克隆指定版本
-          if ! git clone --depth 1 --branch ${ADMIN_VERSION} https://github.com/${OPENIM_ADMIN_REPO}.git openim-admin; then
-            echo "错误: 无法找到版本 ${ADMIN_VERSION}"
-            echo "正在获取可用的标签..."
-            git ls-remote --tags https://github.com/${OPENIM_ADMIN_REPO}.git | head -10
-            exit 1
-          fi
+          echo "处理组件: ${{ matrix.component.name }}"
+          echo "使用版本: ${VERSION}"
           
-          cp dockerfiles/anolis/Dockerfile.web-front openim-admin/Dockerfile
-          cp dockerfiles/anolis/nginx.conf openim-admin/nginx.conf
-
-      - name: 构建并推送OpenIM Admin镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: ./openim-admin
-          file: ./openim-admin/Dockerfile
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: |
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-admin:${{ needs.check-updates.outputs.admin_version }}-anolis
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-admin:latest-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-admin:${{ needs.check-updates.outputs.admin_version }}-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-admin:latest-anolis
+          # 拉取原始镜像
+          docker pull ${{ matrix.component.official_image }}:${VERSION}
+          
+          # 重新标签为Anolis版本
+          docker tag ${{ matrix.component.official_image }}:${VERSION} \
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis
+          docker tag ${{ matrix.component.official_image }}:${VERSION} \
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:latest-anolis
+          
+          # 推送到Docker Hub
+          docker push ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis
+          docker push ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:latest-anolis
+          
+          # 推送到阿里云（可选）
+          if [[ -n "${{ secrets.ALIYUN_USERNAME }}" ]]; then
+            docker tag ${{ matrix.component.official_image }}:${VERSION} \
+              ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis
+            docker tag ${{ matrix.component.official_image }}:${VERSION} \
+              ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:latest-anolis
+            
+            docker push ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis || true
+            docker push ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:latest-anolis || true
+          fi
 
   update-versions:
-    needs: [check-updates, build-server, build-chat, build-web, build-admin]
+    needs: [check-updates, build-server, build-chat, build-base-images, build-web-admin]
     if: always() && needs.check-updates.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
@@ -419,8 +405,6 @@ jobs:
         run: |
           echo "server=${{ needs.check-updates.outputs.server_version }}" > versions.txt
           echo "chat=${{ needs.check-updates.outputs.chat_version }}" >> versions.txt
-          echo "web=${{ needs.check-updates.outputs.web_version }}" >> versions.txt
-          echo "admin=${{ needs.check-updates.outputs.admin_version }}" >> versions.txt
 
       - name: 提交版本更新
         run: |

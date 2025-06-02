@@ -1,5 +1,5 @@
 # 多阶段构建：构建阶段
-FROM openanolis/anolisos:8.10 AS builder
+FROM centos:8 AS builder
 
 # 设置环境变量
 ENV LANG=en_US.UTF-8 \
@@ -8,6 +8,10 @@ ENV LANG=en_US.UTF-8 \
     GO111MODULE=on \
     CGO_ENABLED=0 \
     GOOS=linux
+
+# 修复CentOS 8 YUM源问题（CentOS 8已停止维护）
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 
 # 安装构建依赖
 RUN yum update -y && \
@@ -44,11 +48,15 @@ RUN go install github.com/magefile/mage@latest
 # 构建OpenIM Chat
 RUN make build
 
-# 运行阶段：基于Anolis OS 8.10的最小镜像
-FROM openanolis/anolisos:8.10
+# 运行阶段：基于CentOS 8的最小镜像
+FROM centos:8
 
 # 设置环境变量
 ENV TZ=Asia/Shanghai
+
+# 修复CentOS 8 YUM源问题
+RUN sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
+    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 
 # 安装运行时依赖
 RUN yum update -y && \
