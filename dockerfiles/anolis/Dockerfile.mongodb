@@ -5,8 +5,17 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 ENV MONGODB_VERSION=7.0 \
     TZ=Asia/Shanghai
 
+# 配置Anolis OS yum源
+RUN echo '[anolis]' > /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS-$releasever - Base' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.openanolis.cn/anolis/$releasever/BaseOS/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
+
 # 安装依赖
-RUN yum update -y && \
+RUN yum clean all && \
+    yum makecache && \
+    yum update -y && \
     yum install -y \
         curl \
         gnupg \
@@ -22,9 +31,8 @@ RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
 RUN echo '[mongodb-org-7.0]' > /etc/yum.repos.d/mongodb-org.repo && \
     echo 'name=MongoDB Repository' >> /etc/yum.repos.d/mongodb-org.repo && \
     echo 'baseurl=https://repo.mongodb.org/yum/redhat/8/mongodb-org/7.0/x86_64/' >> /etc/yum.repos.d/mongodb-org.repo && \
-    echo 'gpgcheck=1' >> /etc/yum.repos.d/mongodb-org.repo && \
-    echo 'enabled=1' >> /etc/yum.repos.d/mongodb-org.repo && \
-    echo 'gpgkey=https://www.mongodb.org/static/pgp/server-7.0.asc' >> /etc/yum.repos.d/mongodb-org.repo
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/mongodb-org.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/mongodb-org.repo
 
 # 安装MongoDB
 RUN yum install -y mongodb-org && \

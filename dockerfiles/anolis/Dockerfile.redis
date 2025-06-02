@@ -5,8 +5,17 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 ENV REDIS_VERSION=7.0.15 \
     TZ=Asia/Shanghai
 
+# 配置Anolis OS yum源
+RUN echo '[anolis]' > /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS-$releasever - Base' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.openanolis.cn/anolis/$releasever/BaseOS/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
+
 # 安装编译依赖
-RUN yum update -y && \
+RUN yum clean all && \
+    yum makecache && \
+    yum update -y && \
     yum groupinstall -y "Development Tools" && \
     yum install -y \
         wget \
