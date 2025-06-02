@@ -71,14 +71,19 @@ jobs:
             SHOULD_BUILD=true
           fi
           
+          # 检查是否为定时触发
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            SHOULD_BUILD=true
+          fi
+          
           # 检查版本文件
-          if [[ ! -f server-versions.txt ]]; then
-            echo "server=" > server-versions.txt
+          if [[ ! -f versions.txt ]]; then
+            echo "server=" > versions.txt
             SHOULD_BUILD=true
           fi
           
           # 比较版本
-          PREV_SERVER=$(grep "server=" server-versions.txt | cut -d'=' -f2)
+          PREV_SERVER=$(grep "server=" versions.txt | cut -d'=' -f2)
           
           if [[ "${SERVER_LATEST}" != "${PREV_SERVER}" ]]; then
             SHOULD_BUILD=true
@@ -156,7 +161,7 @@ jobs:
 
   update-server-versions:
     needs: [check-server-updates, build-server]
-    if: always() && needs.check-server-updates.outputs.should_build == 'true'
+    if: success() && needs.check-server-updates.outputs.should_build == 'true' && needs.build-server.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout代码
@@ -164,9 +169,21 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 更新Server版本文件
+      - name: 更新Server版本文件（仅构建成功后）
         run: |
-          echo "server=${{ needs.check-server-updates.outputs.server_version }}" > server-versions.txt
+          echo "✅ 构建成功，更新版本文件..."
+          # 保留chat版本，只更新server版本
+          if [[ -f versions.txt ]]; then
+            CHAT_VERSION=$(grep "chat=" versions.txt | cut -d'=' -f2 2>/dev/null || echo "")
+            if [[ -n "$CHAT_VERSION" ]]; then
+              echo "server=${{ needs.check-server-updates.outputs.server_version }}" > versions.txt
+              echo "chat=$CHAT_VERSION" >> versions.txt
+            else
+              echo "server=${{ needs.check-server-updates.outputs.server_version }}" > versions.txt
+            fi
+          else
+            echo "server=${{ needs.check-server-updates.outputs.server_version }}" > versions.txt
+          fi
 
       - name: 更新环境配置文件
         run: |
@@ -182,7 +199,7 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add server-versions.txt .env
+          git add versions.txt .env
           git commit -m "🚀 更新OpenIM Server版本到 ${{ needs.check-server-updates.outputs.server_version }}" || exit 0
           git push
 

@@ -104,6 +104,12 @@ jobs:
             COMPONENTS_TO_BUILD="mongodb,redis"
           fi
           
+          # 检查是否为定时触发
+          if [[ "${{ github.event_name }}" == "schedule" ]]; then
+            SHOULD_BUILD=true
+            COMPONENTS_TO_BUILD="mongodb,redis"
+          fi
+          
           # 检查版本文件
           if [[ ! -f base-versions.txt ]]; then
             echo "mongodb=" > base-versions.txt
@@ -232,7 +238,7 @@ jobs:
 
   update-base-versions:
     needs: [check-base-component-updates, build-base-components]
-    if: always() && needs.check-base-component-updates.outputs.should_build == 'true'
+    if: success() && needs.check-base-component-updates.outputs.should_build == 'true' && needs.build-base-components.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout代码
@@ -240,8 +246,9 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 更新基础组件版本文件
+      - name: 更新基础组件版本文件（仅构建成功后）
         run: |
+          echo "✅ 构建成功，更新版本文件..."
           echo "mongodb=${{ needs.check-base-component-updates.outputs.mongodb_version }}" > base-versions.txt
           echo "redis=${{ needs.check-base-component-updates.outputs.redis_version }}" >> base-versions.txt
 
