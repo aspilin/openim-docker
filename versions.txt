@@ -1,4 +1,4 @@
-server=
-chat=
-web=
-admin= 
+server=v3.8.3-patch.4
+chat=v1.8.4-patch.2
+web=null
+admin=null
