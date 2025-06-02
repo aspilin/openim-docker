@@ -2,10 +2,10 @@
 
 <div align="center">
 
-[![GitHub release](https://img.shields.io/github/release/aspirin2019/openim-docker.svg)](https://github.com/aspirin2019/openim-docker/releases)
+[![GitHub release](https://img.shields.io/github/release/aspilin/openim-docker.svg)](https://github.com/aspilin/openim-docker/releases)
 [![Docker Pulls](https://img.shields.io/docker/pulls/aspirin2019/openim-server.svg)](https://hub.docker.com/u/aspirin2019)
-[![License](https://img.shields.io/badge/license-Apache--2.0-green)](https://github.com/aspirin2019/openim-docker/blob/main/LICENSE)
-[![Build Status](https://github.com/aspirin2019/openim-docker/workflows/Build%20OpenIM%20Images%20on%20Anolis%20OS%208.10/badge.svg)](https://github.com/aspirin2019/openim-docker/actions)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green)](https://github.com/aspilin/openim-docker/blob/main/LICENSE)
+[![Build Status](https://github.com/aspilin/openim-docker/workflows/Build%20OpenIM%20Images%20on%20Anolis%20OS%208.10/badge.svg)](https://github.com/aspilin/openim-docker/actions)
 
 **基于 Anolis OS 8.10 的 OpenIM 容器化部署方案**
 
@@ -59,7 +59,7 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/aspirin2019/openim-docker.git
+git clone https://github.com/aspilin/openim-docker.git
 cd openim-docker
 
 # 2. 运行部署脚本
@@ -283,8 +283,8 @@ kubectl apply -f .
 
 - 📖 [详细使用指南](docs/USAGE.md)
 - 🔧 [配置参考](env.example)
-- 🐛 [问题反馈](https://github.com/aspirin2019/openim-docker/issues)
-- 💬 [讨论区](https://github.com/aspirin2019/openim-docker/discussions)
+- 🐛 [问题反馈](https://github.com/aspilin/openim-docker/issues)
+- 💬 [讨论区](https://github.com/aspilin/openim-docker/discussions)
 
 ## 🤝 贡献指南
 
@@ -312,8 +312,7 @@ kubectl apply -f .
 
 **如果这个项目对您有帮助，请给个 ⭐ Star 支持一下！**
 
-Made with ❤️ by [aspirin2019](https://github.com/aspirin2019)
+Made with ❤️ by [aspilin](https://github.com/aspilin)
 
 </div>
 ```
-

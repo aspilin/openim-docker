@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # OpenIM Docker部署脚本 - Anolis OS 8.10版本
-# 作者: aspirin2019
+# 作者: aspilin
 # 版本: 1.0.0
 
 set -e
