@@ -2,8 +2,8 @@
 FROM registry.openanolis.cn/openanolis/anolisos:8.10
 
 # 设置环境变量
-ENV MONGO_VERSION=7.0.4 \
-    TZ=Asia/Shanghai
+ENV MONGO_VERSION=7.0.4
+ENV TZ=Asia/Shanghai
 
 # 尝试安装依赖包，忽略RPM数据库错误
 RUN (rm -rf /var/lib/rpm/__db* && rpm --initdb) || true && \

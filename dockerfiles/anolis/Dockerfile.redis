@@ -2,8 +2,8 @@
 FROM registry.openanolis.cn/openanolis/anolisos:8.10
 
 # 设置环境变量
-ENV REDIS_VERSION=7.0.15 \
-    TZ=Asia/Shanghai
+ENV REDIS_VERSION=7.0.15
+ENV TZ=Asia/Shanghai
 
 # 尝试安装编译依赖，忽略RPM数据库错误
 RUN (rm -rf /var/lib/rpm/__db* && rpm --initdb) || true && \

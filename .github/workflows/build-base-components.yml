@@ -12,6 +12,10 @@ on:
         description: '选择要构建的组件 (用逗号分隔，如: mongodb,redis)'
         required: false
         default: 'mongodb,redis'
+      test_build:
+        description: '仅测试构建，不推送镜像'
+        type: boolean
+        default: false
   
   # 定时检查更新 (每周一 UTC 3:00)
   schedule:
@@ -184,14 +188,27 @@ jobs:
           
           if [[ "${{ matrix.component }}" == "mongodb" ]]; then
             VERSION="${{ needs.check-base-component-updates.outputs.mongodb_version }}"
-            # 更新MongoDB版本
-            sed -i "s/ENV MONGO_VERSION=.*/ENV MONGO_VERSION=${VERSION}/" $DOCKERFILE
+            # 更新MongoDB版本，使用更精确的模式匹配
+            sed -i "s/^ENV MONGO_VERSION=[0-9.]*/ENV MONGO_VERSION=${VERSION}/" $DOCKERFILE
             echo "📝 更新MongoDB版本到 ${VERSION}"
           elif [[ "${{ matrix.component }}" == "redis" ]]; then
             VERSION="${{ needs.check-base-component-updates.outputs.redis_version }}"
-            # 更新Redis版本  
-            sed -i "s/ENV REDIS_VERSION=.*/ENV REDIS_VERSION=${VERSION}/" $DOCKERFILE
+            # 更新Redis版本，使用更精确的模式匹配
+            sed -i "s/^ENV REDIS_VERSION=[0-9.]*/ENV REDIS_VERSION=${VERSION}/" $DOCKERFILE
             echo "📝 更新Redis版本到 ${VERSION}"
+          fi
+          
+          # 显示更新后的前10行以便调试
+          echo "🔍 更新后的Dockerfile前10行："
+          head -10 $DOCKERFILE
+          
+          # 验证Dockerfile基本语法（检查ENV行）
+          echo "🔍 验证ENV语法..."
+          if grep -E "^ENV .+ \\\\" $DOCKERFILE; then
+            echo "✅ 多行ENV格式正确"
+          else
+            echo "⚠️ 未找到多行ENV格式，检查单行ENV："
+            grep "^ENV" $DOCKERFILE || echo "❌ 未找到ENV行"
           fi
 
       - name: 构建并推送${{ matrix.component }}镜像
@@ -201,7 +218,7 @@ jobs:
           context: ./dockerfiles/anolis
           file: ./dockerfiles/anolis/Dockerfile.${{ matrix.component }}
           platforms: linux/amd64
-          push: true
+          push: ${{ github.event.inputs.test_build != 'true' }}
           tags: |
             ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component }}:${{ matrix.component == 'mongodb' && needs.check-base-component-updates.outputs.mongodb_version || needs.check-base-component-updates.outputs.redis_version }}-anolis
             ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component }}:latest-anolis
