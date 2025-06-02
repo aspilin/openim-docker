@@ -5,8 +5,9 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 ENV REDIS_VERSION=7.0.15 \
     TZ=Asia/Shanghai
 
-# 修复RPM数据库并安装编译依赖
-RUN rpm --rebuilddb && \
+# 重新初始化RPM数据库并安装编译依赖
+RUN rm -rf /var/lib/rpm/__db* && \
+    rpm --initdb && \
     microdnf install -y \
         wget \
         curl \
