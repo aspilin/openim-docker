@@ -1,2 +1,2 @@
 mongodb=7.0.4
-redis=7.0.15
+redis=7.2.3
