@@ -49,11 +49,31 @@ WORKDIR /workspace
 # 复制源码
 COPY . .
 
-# 安装mage构建工具
-RUN go install github.com/magefile/mage@latest
+# 创建必要的目录
+RUN mkdir -p _output/bin
 
-# 构建OpenIM Chat
-RUN make build
+# 安装mage构建工具并构建所有组件
+RUN go install github.com/magefile/mage@latest && \
+    mage build
+
+# 如果mage build失败，尝试使用make
+RUN if [ ! -f "_output/bin/chat-api" ] && [ ! -f "_output/bin/openim-chat" ]; then \
+        echo "mage build failed, trying make..." && \
+        make build; \
+    fi
+
+# 如果还是没有二进制文件，尝试直接go build
+RUN if [ ! -f "_output/bin/chat-api" ] && [ ! -f "_output/bin/openim-chat" ]; then \
+        echo "make build failed, trying direct go build..." && \
+        mkdir -p _output/bin && \
+        go build -o _output/bin/chat-api ./cmd/api && \
+        go build -o _output/bin/admin-api ./cmd/admin; \
+    fi
+
+# 验证构建结果
+RUN ls -la _output/bin/ && \
+    (test -f "_output/bin/chat-api" || test -f "_output/bin/openim-chat" || \
+     (echo "Build failed: no chat binary found" && exit 1))
 
 # 运行阶段：基于Anolis OS 8.10的最小镜像
 FROM registry.openanolis.cn/openanolis/anolisos:8.10
@@ -87,7 +107,9 @@ RUN mkdir -p /openim/{bin,config,logs} && \
 
 # 从构建阶段复制二进制文件
 COPY --from=builder /workspace/_output/bin/ /openim/bin/
-COPY --from=builder /workspace/config/ /openim/config/
+
+# 创建配置目录（运行时挂载）
+RUN mkdir -p /openim/config
 
 # 设置权限
 RUN chmod +x /openim/bin/*
@@ -99,10 +121,10 @@ WORKDIR /openim
 
 # 健康检查
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD /openim/bin/openim-chat --version || exit 1
+    CMD /openim/bin/chat-api --version || /openim/bin/openim-chat --version || exit 1
 
 # 暴露端口
 EXPOSE 10008 10009
 
 # 启动命令
-CMD ["/openim/bin/openim-chat"] 
+CMD ["/openim/bin/chat-api"] 

@@ -5,9 +5,8 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 ENV REDIS_VERSION=7.0.15 \
     TZ=Asia/Shanghai
 
-# 重新初始化RPM数据库并安装编译依赖
-RUN rm -rf /var/lib/rpm/__db* && \
-    rpm --initdb && \
+# 尝试安装编译依赖，忽略RPM数据库错误
+RUN (rm -rf /var/lib/rpm/__db* && rpm --initdb) || true && \
     microdnf install -y \
         wget \
         curl \
@@ -16,8 +15,18 @@ RUN rm -rf /var/lib/rpm/__db* && \
         gcc \
         gcc-c++ \
         tcl \
-        tcl-devel && \
-    microdnf clean all
+        tcl-devel || \
+    (echo "microdnf failed, trying yum..." && \
+     yum install -y \
+        wget \
+        curl \
+        ca-certificates \
+        make \
+        gcc \
+        gcc-c++ \
+        tcl \
+        tcl-devel) && \
+    (microdnf clean all || yum clean all)
 
 # 设置时区
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \

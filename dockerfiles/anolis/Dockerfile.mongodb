@@ -5,15 +5,20 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 ENV MONGO_VERSION=7.0.4 \
     TZ=Asia/Shanghai
 
-# 重新初始化RPM数据库并安装依赖包
-RUN rm -rf /var/lib/rpm/__db* && \
-    rpm --initdb && \
+# 尝试安装依赖包，忽略RPM数据库错误
+RUN (rm -rf /var/lib/rpm/__db* && rpm --initdb) || true && \
     microdnf install -y \
         curl \
         gnupg \
         ca-certificates \
-        tzdata && \
-    microdnf clean all
+        tzdata || \
+    (echo "microdnf failed, trying yum..." && \
+     yum install -y \
+        curl \
+        gnupg \
+        ca-certificates \
+        tzdata) && \
+    (microdnf clean all || yum clean all)
 
 # 设置时区
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
