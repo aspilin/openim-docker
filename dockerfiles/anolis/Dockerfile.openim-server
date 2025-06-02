@@ -9,8 +9,29 @@ ENV LANG=en_US.UTF-8 \
     CGO_ENABLED=0 \
     GOOS=linux
 
+# 配置Anolis OS阿里云yum源
+RUN echo '[anolis-baseos]' > /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS-$releasever - BaseOS' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/anolis/$releasever/BaseOS/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo && \
+    echo '' >> /etc/yum.repos.d/anolis.repo && \
+    echo '[anolis-appstream]' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS-$releasever - AppStream' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/anolis/$releasever/AppStream/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo && \
+    echo '' >> /etc/yum.repos.d/anolis.repo && \
+    echo '[anolis-powertools]' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS-$releasever - PowerTools' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/anolis/$releasever/PowerTools/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
+
 # 安装构建依赖
-RUN yum update -y && \
+RUN yum clean all && \
+    yum makecache && \
+    yum update -y && \
     yum install -y \
         wget \
         curl \
@@ -50,8 +71,17 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 # 设置环境变量
 ENV TZ=Asia/Shanghai
 
+# 配置Anolis OS阿里云yum源
+RUN echo '[anolis-baseos]' > /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS-$releasever - BaseOS' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/anolis/$releasever/BaseOS/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
+
 # 安装运行时依赖
-RUN yum update -y && \
+RUN yum clean all && \
+    yum makecache && \
+    yum update -y && \
     yum install -y \
         ca-certificates \
         tzdata \
