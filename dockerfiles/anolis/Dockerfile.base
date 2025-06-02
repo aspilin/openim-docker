@@ -1,0 +1,45 @@
+# 基于Anolis OS 8.10的基础镜像
+FROM openanolis/anolisos:8.10
+
+# 设置环境变量
+ENV LANG=en_US.UTF-8 \
+    LC_ALL=en_US.UTF-8 \
+    GOPROXY=https://goproxy.cn,direct \
+    GO111MODULE=on \
+    CGO_ENABLED=0
+
+# 安装基础依赖
+RUN yum update -y && \
+    yum install -y \
+        wget \
+        curl \
+        git \
+        make \
+        gcc \
+        gcc-c++ \
+        tar \
+        gzip \
+        unzip \
+        ca-certificates \
+        tzdata && \
+    yum clean all
+
+# 设置时区
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo 'Asia/Shanghai' > /etc/timezone
+
+# 安装Go环境 (最新稳定版本)
+RUN wget -O go.tar.gz https://golang.google.cn/dl/go1.21.5.linux-amd64.tar.gz && \
+    tar -C /usr/local -xzf go.tar.gz && \
+    rm go.tar.gz
+
+# 设置Go环境变量
+ENV PATH="/usr/local/go/bin:${PATH}" \
+    GOPATH="/go" \
+    GOROOT="/usr/local/go"
+
+# 创建工作目录
+WORKDIR /workspace
+
+# 验证Go安装
+RUN go version

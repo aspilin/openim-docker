@@ -1,0 +1,342 @@
+name: Build OpenIM Images on Anolis OS 8.10
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      openim_server_tag:
+        description: 'OpenIM Server版本标签'
+        required: true
+        default: 'latest'
+      openim_chat_tag:
+        description: 'OpenIM Chat版本标签'
+        required: true
+        default: 'latest'
+      force_rebuild:
+        description: '强制重新构建所有镜像'
+        type: boolean
+        default: false
+  
+  # 定时检查更新 (每天 UTC 2:00)
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # 推送到main分支时触发
+  push:
+    branches:
+      - main
+    paths:
+      - 'dockerfiles/anolis/**'
+      - '.github/workflows/build-openim-images.yml'
+
+env:
+  # 镜像仓库配置
+  REGISTRY_DOCKERHUB: docker.io
+  REGISTRY_ALIYUN: registry.cn-hangzhou.aliyuncs.com
+  NAMESPACE: aspirin2019  # 您的Docker Hub命名空间
+  ALIYUN_NAMESPACE: aspirin2019  # 您的阿里云镜像仓库命名空间
+  
+  # OpenIM官方仓库
+  OPENIM_SERVER_REPO: openimsdk/open-im-server
+  OPENIM_CHAT_REPO: openimsdk/chat
+  OPENIM_WEB_REPO: openimsdk/openim-web
+  OPENIM_ADMIN_REPO: openimsdk/openim-admin
+
+jobs:
+  check-updates:
+    runs-on: ubuntu-latest
+    outputs:
+      server_version: ${{ steps.check.outputs.server_version }}
+      chat_version: ${{ steps.check.outputs.chat_version }}
+      web_version: ${{ steps.check.outputs.web_version }}
+      admin_version: ${{ steps.check.outputs.admin_version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 检查OpenIM版本更新
+        id: check
+        run: |
+          # 获取最新版本
+          SERVER_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_SERVER_REPO}/releases/latest | jq -r .tag_name)
+          CHAT_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_CHAT_REPO}/releases/latest | jq -r .tag_name)
+          WEB_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_WEB_REPO}/releases/latest | jq -r .tag_name)
+          ADMIN_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_ADMIN_REPO}/releases/latest | jq -r .tag_name)
+          
+          echo "server_version=${SERVER_LATEST}" >> $GITHUB_OUTPUT
+          echo "chat_version=${CHAT_LATEST}" >> $GITHUB_OUTPUT
+          echo "web_version=${WEB_LATEST}" >> $GITHUB_OUTPUT
+          echo "admin_version=${ADMIN_LATEST}" >> $GITHUB_OUTPUT
+          
+          # 检查是否需要构建
+          SHOULD_BUILD=false
+          
+          # 检查是否为手动触发或强制重建
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SHOULD_BUILD=true
+          fi
+          
+          # 检查是否为push触发
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            SHOULD_BUILD=true
+          fi
+          
+          # 检查版本文件
+          if [[ ! -f versions.txt ]]; then
+            echo "server=" > versions.txt
+            echo "chat=" >> versions.txt
+            echo "web=" >> versions.txt
+            echo "admin=" >> versions.txt
+            SHOULD_BUILD=true
+          fi
+          
+          # 比较版本
+          PREV_SERVER=$(grep "server=" versions.txt | cut -d'=' -f2)
+          PREV_CHAT=$(grep "chat=" versions.txt | cut -d'=' -f2)
+          PREV_WEB=$(grep "web=" versions.txt | cut -d'=' -f2)
+          PREV_ADMIN=$(grep "admin=" versions.txt | cut -d'=' -f2)
+          
+          if [[ "${SERVER_LATEST}" != "${PREV_SERVER}" ]] || \
+             [[ "${CHAT_LATEST}" != "${PREV_CHAT}" ]] || \
+             [[ "${WEB_LATEST}" != "${PREV_WEB}" ]] || \
+             [[ "${ADMIN_LATEST}" != "${PREV_ADMIN}" ]]; then
+            SHOULD_BUILD=true
+          fi
+          
+          echo "should_build=${SHOULD_BUILD}" >> $GITHUB_OUTPUT
+          
+          echo "检测到的版本:"
+          echo "OpenIM Server: ${SERVER_LATEST} (之前: ${PREV_SERVER})"
+          echo "OpenIM Chat: ${CHAT_LATEST} (之前: ${PREV_CHAT})"
+          echo "OpenIM Web: ${WEB_LATEST} (之前: ${PREV_WEB})"
+          echo "OpenIM Admin: ${ADMIN_LATEST} (之前: ${PREV_ADMIN})"
+          echo "是否需要构建: ${SHOULD_BUILD}"
+
+  build-server:
+    needs: check-updates
+    if: needs.check-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_DOCKERHUB }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 登录阿里云镜像仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: 下载OpenIM Server源码
+        run: |
+          SERVER_VERSION=${{ needs.check-updates.outputs.server_version }}
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SERVER_VERSION=${{ github.event.inputs.openim_server_tag }}
+          fi
+          
+          git clone --depth 1 --branch ${SERVER_VERSION} https://github.com/${OPENIM_SERVER_REPO}.git openim-server
+          cp dockerfiles/anolis/Dockerfile.openim-server openim-server/Dockerfile
+
+      - name: 构建并推送OpenIM Server镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./openim-server
+          file: ./openim-server/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-server:${{ needs.check-updates.outputs.server_version }}-anolis
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-server:latest-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:${{ needs.check-updates.outputs.server_version }}-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:latest-anolis
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=OpenIM Server on Anolis OS 8.10
+            org.opencontainers.image.description=OpenIM Server built on Anolis OS 8.10
+            org.opencontainers.image.version=${{ needs.check-updates.outputs.server_version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  build-chat:
+    needs: check-updates
+    if: needs.check-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_DOCKERHUB }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 登录阿里云镜像仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: 下载OpenIM Chat源码
+        run: |
+          CHAT_VERSION=${{ needs.check-updates.outputs.chat_version }}
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CHAT_VERSION=${{ github.event.inputs.openim_chat_tag }}
+          fi
+          
+          git clone --depth 1 --branch ${CHAT_VERSION} https://github.com/${OPENIM_CHAT_REPO}.git openim-chat
+          cp dockerfiles/anolis/Dockerfile.openim-chat openim-chat/Dockerfile
+
+      - name: 构建并推送OpenIM Chat镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./openim-chat
+          file: ./openim-chat/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-chat:${{ needs.check-updates.outputs.chat_version }}-anolis
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-chat:latest-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-chat:${{ needs.check-updates.outputs.chat_version }}-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-chat:latest-anolis
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=OpenIM Chat on Anolis OS 8.10
+            org.opencontainers.image.description=OpenIM Chat built on Anolis OS 8.10
+            org.opencontainers.image.version=${{ needs.check-updates.outputs.chat_version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  build-web:
+    needs: check-updates
+    if: needs.check-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_DOCKERHUB }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 登录阿里云镜像仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: 下载OpenIM Web源码
+        run: |
+          WEB_VERSION=${{ needs.check-updates.outputs.web_version }}
+          git clone --depth 1 --branch ${WEB_VERSION} https://github.com/${OPENIM_WEB_REPO}.git openim-web
+          cp dockerfiles/anolis/Dockerfile.web-front openim-web/Dockerfile
+          cp dockerfiles/anolis/nginx.conf openim-web/nginx.conf
+
+      - name: 构建并推送OpenIM Web镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./openim-web
+          file: ./openim-web/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-web:${{ needs.check-updates.outputs.web_version }}-anolis
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-web:latest-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-web:${{ needs.check-updates.outputs.web_version }}-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-web:latest-anolis
+
+  build-admin:
+    needs: check-updates
+    if: needs.check-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_DOCKERHUB }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 登录阿里云镜像仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: 下载OpenIM Admin源码
+        run: |
+          ADMIN_VERSION=${{ needs.check-updates.outputs.admin_version }}
+          git clone --depth 1 --branch ${ADMIN_VERSION} https://github.com/${OPENIM_ADMIN_REPO}.git openim-admin
+          cp dockerfiles/anolis/Dockerfile.web-front openim-admin/Dockerfile
+          cp dockerfiles/anolis/nginx.conf openim-admin/nginx.conf
+
+      - name: 构建并推送OpenIM Admin镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./openim-admin
+          file: ./openim-admin/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-admin:${{ needs.check-updates.outputs.admin_version }}-anolis
+            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-admin:latest-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-admin:${{ needs.check-updates.outputs.admin_version }}-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-admin:latest-anolis
+
+  update-versions:
+    needs: [check-updates, build-server, build-chat, build-web, build-admin]
+    if: always() && needs.check-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 更新版本文件
+        run: |
+          echo "server=${{ needs.check-updates.outputs.server_version }}" > versions.txt
+          echo "chat=${{ needs.check-updates.outputs.chat_version }}" >> versions.txt
+          echo "web=${{ needs.check-updates.outputs.web_version }}" >> versions.txt
+          echo "admin=${{ needs.check-updates.outputs.admin_version }}" >> versions.txt
+
+      - name: 提交版本更新
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add versions.txt
+          git commit -m "更新OpenIM版本到 server:${{ needs.check-updates.outputs.server_version }}, chat:${{ needs.check-updates.outputs.chat_version }}" || exit 0
+          git push 
+          

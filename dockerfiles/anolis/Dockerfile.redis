@@ -1,0 +1,57 @@
+# 基于Anolis OS 8.10构建Redis
+FROM openanolis/anolisos:8.10
+
+# 设置环境变量
+ENV REDIS_VERSION=7.2 \
+    TZ=Asia/Shanghai
+
+# 安装依赖和编译工具
+RUN yum update -y && \
+    yum groupinstall -y "Development Tools" && \
+    yum install -y \
+        wget \
+        curl \
+        ca-certificates \
+        tzdata \
+        tcl \
+        which && \
+    yum clean all
+
+# 设置时区
+RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
+    echo 'Asia/Shanghai' > /etc/timezone
+
+# 下载并编译Redis
+RUN cd /tmp && \
+    wget http://download.redis.io/redis-stable.tar.gz && \
+    tar xzf redis-stable.tar.gz && \
+    cd redis-stable && \
+    make && \
+    make install && \
+    cd / && \
+    rm -rf /tmp/redis-stable*
+
+# 创建Redis用户和目录
+RUN groupadd -r redis && useradd -r -g redis redis && \
+    mkdir -p /data /etc/redis /var/log/redis && \
+    chown -R redis:redis /data /var/log/redis
+
+# 复制Redis配置文件
+COPY redis.conf /etc/redis/redis.conf
+RUN chown redis:redis /etc/redis/redis.conf
+
+# 暴露端口
+EXPOSE 6379
+
+# 切换到redis用户
+USER redis
+
+# 设置数据目录
+WORKDIR /data
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD redis-cli ping || exit 1
+
+# 启动Redis
+CMD ["redis-server", "/etc/redis/redis.conf"] 

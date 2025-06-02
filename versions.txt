@@ -1,0 +1,4 @@
+server=
+chat=
+web=
+admin= 
