@@ -2,57 +2,60 @@
 FROM registry.openanolis.cn/openanolis/anolisos:8.10
 
 # 设置环境变量
-ENV MONGODB_VERSION=7.0 \
+ENV MONGO_VERSION=7.0.4 \
     TZ=Asia/Shanghai
 
-# 配置Anolis OS阿里云yum源
-RUN echo '[anolis-baseos]' > /etc/yum.repos.d/anolis.repo && \
-    echo 'name=AnolisOS-$releasever - BaseOS' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'baseurl=https://mirrors.aliyun.com/anolis/$releasever/BaseOS/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
-
-# 安装依赖
-RUN yum clean all && \
-    yum makecache && \
-    yum update -y && \
-    yum install -y \
+# 安装依赖包 - 使用dnf
+RUN dnf clean all && \
+    dnf makecache && \
+    dnf update -y && \
+    dnf install -y \
         curl \
         gnupg \
         ca-certificates \
         tzdata && \
-    yum clean all
+    dnf clean all
 
 # 设置时区
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
     echo 'Asia/Shanghai' > /etc/timezone
 
-# 添加MongoDB YUM仓库
-RUN echo '[mongodb-org-7.0]' > /etc/yum.repos.d/mongodb-org.repo && \
-    echo 'name=MongoDB Repository' >> /etc/yum.repos.d/mongodb-org.repo && \
-    echo 'baseurl=https://repo.mongodb.org/yum/redhat/8/mongodb-org/7.0/x86_64/' >> /etc/yum.repos.d/mongodb-org.repo && \
-    echo 'gpgcheck=0' >> /etc/yum.repos.d/mongodb-org.repo && \
-    echo 'enabled=1' >> /etc/yum.repos.d/mongodb-org.repo
+# 创建mongodb用户和数据目录
+RUN groupadd -r mongodb && useradd -r -g mongodb mongodb && \
+    mkdir -p /data/db /data/configdb /var/log/mongodb && \
+    chown -R mongodb:mongodb /data/db /data/configdb /var/log/mongodb
 
-# 安装MongoDB
-RUN yum install -y mongodb-org && \
-    yum clean all
+# 下载并安装MongoDB
+WORKDIR /tmp
+RUN ARCH="$(uname -m)" && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        MONGO_ARCH="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ]; then \
+        MONGO_ARCH="aarch64"; \
+    else \
+        echo "Unsupported architecture: $ARCH" && exit 1; \
+    fi && \
+    curl -fSL "https://fastdl.mongodb.org/linux/mongodb-linux-${MONGO_ARCH}-rhel80-${MONGO_VERSION}.tgz" -o mongodb.tgz && \
+    tar -xzf mongodb.tgz && \
+    cp mongodb-*/bin/* /usr/local/bin/ && \
+    rm -rf /tmp/mongodb* && \
+    chmod +x /usr/local/bin/mongo*
 
-# 创建MongoDB用户和目录
-RUN mkdir -p /data/db /data/configdb /var/log/mongodb && \
-    chown -R mongod:mongod /data/db /data/configdb /var/log/mongodb
-
-# 复制配置文件
+# 复制MongoDB配置文件
 COPY mongod.conf /etc/mongod.conf
+RUN chown mongodb:mongodb /etc/mongod.conf
+
+# 切换到mongodb用户
+USER mongodb
+
+# 设置工作目录
+WORKDIR /data/db
 
 # 暴露端口
 EXPOSE 27017
 
-# 切换到mongod用户
-USER mongod
-
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD mongosh --eval "db.adminCommand('ping')" || exit 1
 
 # 启动MongoDB

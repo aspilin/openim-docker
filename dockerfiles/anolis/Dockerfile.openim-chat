@@ -9,31 +9,11 @@ ENV LANG=en_US.UTF-8 \
     CGO_ENABLED=0 \
     GOOS=linux
 
-# 配置Anolis OS阿里云yum源
-RUN rm -f /etc/yum.repos.d/*.repo && \
-    echo '[anolis-baseos]' > /etc/yum.repos.d/anolis.repo && \
-    echo 'name=AnolisOS 8.10 - BaseOS' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'baseurl=https://mirrors.aliyun.com/anolis/8.10/BaseOS/x86_64/os/' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo && \
-    echo '' >> /etc/yum.repos.d/anolis.repo && \
-    echo '[anolis-appstream]' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'name=AnolisOS 8.10 - AppStream' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'baseurl=https://mirrors.aliyun.com/anolis/8.10/AppStream/x86_64/os/' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo && \
-    echo '' >> /etc/yum.repos.d/anolis.repo && \
-    echo '[anolis-powertools]' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'name=AnolisOS 8.10 - PowerTools' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'baseurl=https://mirrors.aliyun.com/anolis/8.10/PowerTools/x86_64/os/' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
-
-# 安装构建依赖
-RUN yum clean all && \
-    yum makecache fast && \
-    yum update -y && \
-    yum install -y \
+# 安装构建依赖 - 使用dnf
+RUN dnf clean all && \
+    dnf makecache && \
+    dnf update -y && \
+    dnf install -y \
         wget \
         curl \
         git \
@@ -43,7 +23,7 @@ RUN yum clean all && \
         tar \
         gzip \
         ca-certificates && \
-    yum clean all
+    dnf clean all
 
 # 安装Go环境
 RUN wget -O go.tar.gz https://golang.google.cn/dl/go1.21.5.linux-amd64.tar.gz && \
@@ -72,23 +52,15 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 # 设置环境变量
 ENV TZ=Asia/Shanghai
 
-# 配置Anolis OS阿里云yum源
-RUN rm -f /etc/yum.repos.d/*.repo && \
-    echo '[anolis-baseos]' > /etc/yum.repos.d/anolis.repo && \
-    echo 'name=AnolisOS 8.10 - BaseOS' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'baseurl=https://mirrors.aliyun.com/anolis/8.10/BaseOS/x86_64/os/' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
-
-# 安装运行时依赖
-RUN yum clean all && \
-    yum makecache fast && \
-    yum update -y && \
-    yum install -y \
+# 安装运行时依赖 - 使用dnf
+RUN dnf clean all && \
+    dnf makecache && \
+    dnf update -y && \
+    dnf install -y \
         ca-certificates \
         tzdata \
         curl && \
-    yum clean all
+    dnf clean all
 
 # 设置时区
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
