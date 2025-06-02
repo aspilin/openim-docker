@@ -5,16 +5,14 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 ENV MONGO_VERSION=7.0.4 \
     TZ=Asia/Shanghai
 
-# 安装依赖包 - 使用dnf
-RUN dnf clean all && \
-    dnf makecache && \
-    dnf update -y && \
-    dnf install -y \
+# 修复RPM数据库并安装依赖包
+RUN rpm --rebuilddb && \
+    microdnf install -y \
         curl \
         gnupg \
         ca-certificates \
         tzdata && \
-    dnf clean all
+    microdnf clean all
 
 # 设置时区
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \

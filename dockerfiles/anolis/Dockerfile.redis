@@ -5,18 +5,18 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 ENV REDIS_VERSION=7.0.15 \
     TZ=Asia/Shanghai
 
-# 安装编译依赖 - 使用dnf
-RUN dnf clean all && \
-    dnf makecache && \
-    dnf update -y && \
-    dnf groupinstall -y "Development Tools" && \
-    dnf install -y \
+# 修复RPM数据库并安装编译依赖
+RUN rpm --rebuilddb && \
+    microdnf install -y \
         wget \
         curl \
         ca-certificates \
+        make \
+        gcc \
+        gcc-c++ \
         tcl \
         tcl-devel && \
-    dnf clean all
+    microdnf clean all
 
 # 设置时区
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \

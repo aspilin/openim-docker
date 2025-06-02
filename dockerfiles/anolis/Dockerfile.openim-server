@@ -9,11 +9,9 @@ ENV LANG=en_US.UTF-8 \
     CGO_ENABLED=0 \
     GOOS=linux
 
-# 安装构建依赖 - 使用dnf
-RUN dnf clean all && \
-    dnf makecache && \
-    dnf update -y && \
-    dnf install -y \
+# 修复RPM数据库并安装构建依赖
+RUN rpm --rebuilddb && \
+    microdnf install -y \
         wget \
         curl \
         git \
@@ -23,7 +21,7 @@ RUN dnf clean all && \
         tar \
         gzip \
         ca-certificates && \
-    dnf clean all
+    microdnf clean all
 
 # 安装Go环境
 RUN wget -O go.tar.gz https://golang.google.cn/dl/go1.21.5.linux-amd64.tar.gz && \
@@ -52,15 +50,13 @@ FROM registry.openanolis.cn/openanolis/anolisos:8.10
 # 设置环境变量
 ENV TZ=Asia/Shanghai
 
-# 安装运行时依赖 - 使用dnf
-RUN dnf clean all && \
-    dnf makecache && \
-    dnf update -y && \
-    dnf install -y \
+# 修复RPM数据库并安装运行时依赖
+RUN rpm --rebuilddb && \
+    microdnf install -y \
         ca-certificates \
         tzdata \
         curl && \
-    dnf clean all
+    microdnf clean all
 
 # 设置时区
 RUN ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime && \
