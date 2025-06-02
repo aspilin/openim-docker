@@ -64,15 +64,17 @@ jobs:
         id: check
         run: |
           # 从官方docker-compose.yml中提取版本信息
-          MONGODB_VERSION=$(grep -A 5 "mongodb:" official-docker-compose.yml | grep "image:" | sed 's/.*mongo:\([^[:space:]]*\).*/\1/' | head -1)
-          REDIS_VERSION=$(grep -A 5 "redis:" official-docker-compose.yml | grep "image:" | sed 's/.*redis:\([^[:space:]]*\).*/\1/' | head -1)
+          MONGODB_VERSION=$(grep -A 10 "mongo:" official-docker-compose.yml | grep "image:" | head -1 | sed -E 's/.*mongo:([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
+          REDIS_VERSION=$(grep -A 10 "redis:" official-docker-compose.yml | grep "image:" | head -1 | sed -E 's/.*redis:([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/')
           
-          # 如果提取失败，使用默认版本
-          if [[ -z "$MONGODB_VERSION" || "$MONGODB_VERSION" == "latest" ]]; then
+          # 如果提取失败或者结果不正确，使用默认版本
+          if [[ -z "$MONGODB_VERSION" || ! "$MONGODB_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
             MONGODB_VERSION="7.0.4"
+            echo "⚠️ MongoDB版本提取失败，使用默认版本: ${MONGODB_VERSION}"
           fi
-          if [[ -z "$REDIS_VERSION" || "$REDIS_VERSION" == "latest" ]]; then
+          if [[ -z "$REDIS_VERSION" || ! "$REDIS_VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
             REDIS_VERSION="7.2.3"
+            echo "⚠️ Redis版本提取失败，使用默认版本: ${REDIS_VERSION}"
           fi
           
           echo "mongodb_version=${MONGODB_VERSION}" >> $GITHUB_OUTPUT

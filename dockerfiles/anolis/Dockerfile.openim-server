@@ -80,13 +80,19 @@ RUN (rm -rf /var/lib/rpm/__db* && rpm --initdb) || true && \
         ca-certificates \
         tzdata \
         curl \
-        bash || \
+        bash \
+        wget \
+        tar \
+        gzip || \
     (echo "microdnf failed, trying yum..." && \
      yum install -y \
         ca-certificates \
         tzdata \
         curl \
-        bash) && \
+        bash \
+        wget \
+        tar \
+        gzip) && \
     (microdnf clean all || yum clean all)
 
 # 安装Go 1.22环境（运行时需要）
