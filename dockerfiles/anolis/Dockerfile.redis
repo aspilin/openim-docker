@@ -1,5 +1,5 @@
 # 基于Anolis OS 8.10构建Redis
-FROM registry.cn-hangzhou.aliyuncs.com/openanolis/anolisos:8.10
+FROM registry.openanolis.cn/openanolis/anolisos:8.10
 
 # 设置环境变量
 ENV REDIS_VERSION=7.0.15 \

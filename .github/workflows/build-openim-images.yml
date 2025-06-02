@@ -12,14 +12,6 @@ on:
         description: 'OpenIM Chat版本标签 (如: v1.7.0)'
         required: true
         default: 'v1.7.0'
-      openim_web_tag:
-        description: 'OpenIM Web版本标签 (如: v3.8.0)'
-        required: true
-        default: 'v3.8.0'
-      openim_admin_tag:
-        description: 'OpenIM Admin版本标签 (如: v1.7.0)'
-        required: true
-        default: 'v1.7.0'
       force_rebuild:
         description: '强制重新构建所有镜像'
         type: boolean
@@ -309,90 +301,8 @@ jobs:
             org.opencontainers.image.description=${{ matrix.component }} built on Anolis OS 8.10
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
 
-  build-web-admin:
-    needs: check-updates
-    if: needs.check-updates.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        component: 
-          - name: openim-web
-            input_tag: openim_web_tag
-            official_image: openimsdk/openim-web
-          - name: openim-admin
-            input_tag: openim_admin_tag
-            official_image: openimsdk/openim-admin
-    steps:
-      - name: Checkout代码
-        uses: actions/checkout@v4
-
-      - name: 设置Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: 登录Docker Hub
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_DOCKERHUB }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 登录阿里云镜像仓库
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_ALIYUN }}
-          username: ${{ secrets.ALIYUN_USERNAME }}
-          password: ${{ secrets.ALIYUN_PASSWORD }}
-        continue-on-error: true
-
-      - name: 重新标签并推送${{ matrix.component.name }}镜像
-        run: |
-          # 确定要使用的版本
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            case "${{ matrix.component.name }}" in
-              "openim-web")
-                VERSION="${{ github.event.inputs.openim_web_tag }}"
-                ;;
-              "openim-admin")
-                VERSION="${{ github.event.inputs.openim_admin_tag }}"
-                ;;
-              *)
-                VERSION="latest"
-                ;;
-            esac
-          else
-            # 对于定时任务，使用latest标签
-            VERSION="latest"
-          fi
-          
-          echo "处理组件: ${{ matrix.component.name }}"
-          echo "使用版本: ${VERSION}"
-          
-          # 拉取原始镜像
-          docker pull ${{ matrix.component.official_image }}:${VERSION}
-          
-          # 重新标签为Anolis版本
-          docker tag ${{ matrix.component.official_image }}:${VERSION} \
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis
-          docker tag ${{ matrix.component.official_image }}:${VERSION} \
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:latest-anolis
-          
-          # 推送到Docker Hub
-          docker push ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis
-          docker push ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component.name }}:latest-anolis
-          
-          # 推送到阿里云（可选）
-          if [[ -n "${{ secrets.ALIYUN_USERNAME }}" ]]; then
-            docker tag ${{ matrix.component.official_image }}:${VERSION} \
-              ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis
-            docker tag ${{ matrix.component.official_image }}:${VERSION} \
-              ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:latest-anolis
-            
-            docker push ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:${VERSION}-anolis || true
-            docker push ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component.name }}:latest-anolis || true
-          fi
-
   update-versions:
-    needs: [check-updates, build-server, build-chat, build-base-images, build-web-admin]
+    needs: [check-updates, build-server, build-chat, build-base-images]
     if: always() && needs.check-updates.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
