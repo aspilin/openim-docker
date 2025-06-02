@@ -6,21 +6,22 @@ ENV REDIS_VERSION=7.0.15 \
     TZ=Asia/Shanghai
 
 # 配置Anolis OS阿里云yum源
-RUN echo '[anolis-baseos]' > /etc/yum.repos.d/anolis.repo && \
-    echo 'name=AnolisOS-$releasever - BaseOS' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'baseurl=https://mirrors.aliyun.com/anolis/$releasever/BaseOS/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+RUN rm -f /etc/yum.repos.d/*.repo && \
+    echo '[anolis-baseos]' > /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS 8.10 - BaseOS' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/anolis/8.10/BaseOS/x86_64/os/' >> /etc/yum.repos.d/anolis.repo && \
     echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
     echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo && \
     echo '' >> /etc/yum.repos.d/anolis.repo && \
     echo '[anolis-powertools]' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'name=AnolisOS-$releasever - PowerTools' >> /etc/yum.repos.d/anolis.repo && \
-    echo 'baseurl=https://mirrors.aliyun.com/anolis/$releasever/PowerTools/$basearch/os/' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'name=AnolisOS 8.10 - PowerTools' >> /etc/yum.repos.d/anolis.repo && \
+    echo 'baseurl=https://mirrors.aliyun.com/anolis/8.10/PowerTools/x86_64/os/' >> /etc/yum.repos.d/anolis.repo && \
     echo 'enabled=1' >> /etc/yum.repos.d/anolis.repo && \
     echo 'gpgcheck=0' >> /etc/yum.repos.d/anolis.repo
 
 # 安装编译依赖
 RUN yum clean all && \
-    yum makecache && \
+    yum makecache fast && \
     yum update -y && \
     yum groupinstall -y "Development Tools" && \
     yum install -y \
