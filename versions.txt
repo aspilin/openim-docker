@@ -1,4 +1,2 @@
 server=v3.8.3-patch.4
 chat=v1.8.4-patch.2
-web=v3.8.0
-admin=v1.7.0
