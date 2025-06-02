@@ -44,9 +44,9 @@ jobs:
 
       - name: 下载私有Chat源码
         run: |
-          # 使用个人访问令牌克隆私有仓库
+          # 使用专门的私有仓库访问令牌
           git clone --depth 1 --branch ${{ github.event.inputs.chat_tag }} \
-            https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.event.inputs.chat_repo }}.git \
+            https://${{ secrets.PRIVATE_REPO_TOKEN }}@github.com/${{ github.event.inputs.chat_repo }}.git \
             private-chat
           
           # 复制Dockerfile
