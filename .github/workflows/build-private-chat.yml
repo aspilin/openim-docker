@@ -1,0 +1,82 @@
+name: Build Private Chat on Anolis OS 8.10
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      chat_repo:
+        description: '私有Chat仓库地址 (如: username/private-chat-repo)'
+        required: true
+      chat_tag:
+        description: 'Chat版本标签或分支 (如: main, v1.0.0)'
+        required: true
+        default: 'main'
+      image_tag:
+        description: '镜像标签 (如: v1.0.0)'
+        required: true
+        default: 'latest'
+      push_to_private:
+        description: '推送到私有仓库'
+        type: boolean
+        default: true
+
+env:
+  # 阿里云私有镜像仓库配置
+  REGISTRY_ALIYUN: registry.cn-hangzhou.aliyuncs.com
+  ALIYUN_PRIVATE_NAMESPACE: aspirin_private  # 私有镜像专用命名空间
+
+jobs:
+  build-private-chat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录阿里云私有镜像仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: 下载私有Chat源码
+        run: |
+          # 使用个人访问令牌克隆私有仓库
+          git clone --depth 1 --branch ${{ github.event.inputs.chat_tag }} \
+            https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.event.inputs.chat_repo }}.git \
+            private-chat
+          
+          # 复制Dockerfile
+          cp dockerfiles/anolis/Dockerfile.openim-chat private-chat/Dockerfile
+
+      - name: 构建并推送私有Chat镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./private-chat
+          file: ./private-chat/Dockerfile
+          platforms: linux/amd64
+          push: ${{ github.event.inputs.push_to_private }}
+          tags: |
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_PRIVATE_NAMESPACE }}/private-chat:${{ github.event.inputs.image_tag }}-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_PRIVATE_NAMESPACE }}/private-chat:latest-anolis
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=Private Chat on Anolis OS 8.10
+            org.opencontainers.image.description=Private Chat built on Anolis OS 8.10
+            org.opencontainers.image.version=${{ github.event.inputs.image_tag }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+      - name: 构建总结
+        run: |
+          echo "🎉 私有Chat镜像构建完成！"
+          echo "📦 镜像地址:"
+          echo "  - ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_PRIVATE_NAMESPACE }}/private-chat:${{ github.event.inputs.image_tag }}-anolis"
+          echo "  - ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_PRIVATE_NAMESPACE }}/private-chat:latest-anolis"
+          echo ""
+          echo "🔐 这些镜像已推送到您的阿里云私有命名空间"
+          echo "💡 使用方式:"
+          echo "   docker pull ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_PRIVATE_NAMESPACE }}/private-chat:${{ github.event.inputs.image_tag }}-anolis" 

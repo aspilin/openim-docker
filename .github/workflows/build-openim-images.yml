@@ -166,7 +166,7 @@ jobs:
         with:
           context: ./openim-server
           file: ./openim-server/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-server:${{ needs.check-updates.outputs.server_version }}-anolis
@@ -240,7 +240,7 @@ jobs:
         with:
           context: ./openim-chat
           file: ./openim-chat/Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-chat:${{ needs.check-updates.outputs.chat_version }}-anolis
@@ -289,7 +289,7 @@ jobs:
         with:
           context: ./dockerfiles/anolis
           file: ./dockerfiles/anolis/Dockerfile.${{ matrix.component }}
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component }}:latest-anolis

@@ -47,7 +47,7 @@ RUN ARCH="$(uname -m)" && \
     tar -C /usr/local -xzf go.tar.gz && \
     rm go.tar.gz
 
-ENV PATH="/usr/local/go/bin:${PATH}" \
+ENV PATH="/usr/local/go/bin:/go/bin:${PATH}" \
     GOPATH="/go" \
     GOROOT="/usr/local/go"
 
