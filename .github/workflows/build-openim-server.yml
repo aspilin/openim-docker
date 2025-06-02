@@ -1,0 +1,195 @@
+name: Build OpenIM Server on Anolis OS 8.10
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      openim_server_tag:
+        description: 'OpenIM Server版本标签 (如: v3.8.0)'
+        required: true
+        default: 'v3.8.0'
+      force_rebuild:
+        description: '强制重新构建镜像'
+        type: boolean
+        default: false
+  
+  # 定时检查更新 (每天 UTC 2:00)
+  schedule:
+    - cron: '0 2 * * *'
+  
+  # 推送到main分支时触发
+  push:
+    branches:
+      - main
+    paths:
+      - 'dockerfiles/anolis/Dockerfile.openim-server'
+      - '.github/workflows/build-openim-server.yml'
+
+env:
+  # 镜像仓库配置
+  REGISTRY_ALIYUN: registry.cn-hangzhou.aliyuncs.com
+  ALIYUN_NAMESPACE: aspirin2019  # 公共镜像命名空间
+  
+  # OpenIM官方仓库
+  OPENIM_SERVER_REPO: openimsdk/open-im-server
+
+jobs:
+  check-server-updates:
+    runs-on: ubuntu-latest
+    outputs:
+      server_version: ${{ steps.check.outputs.server_version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 检查OpenIM Server版本更新
+        id: check
+        run: |
+          # 获取最新版本，如果失败则使用默认版本
+          SERVER_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_SERVER_REPO}/releases/latest | jq -r .tag_name)
+          
+          # 检查获取的版本是否有效，如果无效则使用默认版本
+          if [[ "$SERVER_LATEST" == "null" || -z "$SERVER_LATEST" ]]; then
+            SERVER_LATEST="v3.8.0"
+          fi
+          
+          echo "server_version=${SERVER_LATEST}" >> $GITHUB_OUTPUT
+          
+          # 检查是否需要构建
+          SHOULD_BUILD=false
+          
+          # 检查是否为手动触发或强制重建
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SHOULD_BUILD=true
+          fi
+          
+          # 检查是否为push触发
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            SHOULD_BUILD=true
+          fi
+          
+          # 检查版本文件
+          if [[ ! -f server-versions.txt ]]; then
+            echo "server=" > server-versions.txt
+            SHOULD_BUILD=true
+          fi
+          
+          # 比较版本
+          PREV_SERVER=$(grep "server=" server-versions.txt | cut -d'=' -f2)
+          
+          if [[ "${SERVER_LATEST}" != "${PREV_SERVER}" ]]; then
+            SHOULD_BUILD=true
+          fi
+          
+          echo "should_build=${SHOULD_BUILD}" >> $GITHUB_OUTPUT
+          
+          echo "🔍 检测到的版本:"
+          echo "OpenIM Server: ${SERVER_LATEST} (之前: ${PREV_SERVER})"
+          echo "是否需要构建: ${SHOULD_BUILD}"
+
+  build-server:
+    needs: check-server-updates
+    if: needs.check-server-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录阿里云镜像仓库
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: 下载OpenIM Server源码
+        run: |
+          # 确定要使用的版本
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SERVER_VERSION="${{ github.event.inputs.openim_server_tag }}"
+          else
+            SERVER_VERSION="${{ needs.check-server-updates.outputs.server_version }}"
+          fi
+          
+          echo "🚀 使用版本: ${SERVER_VERSION}"
+          
+          # 检查版本格式
+          if [[ ! "$SERVER_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
+            echo "❌ 错误: 版本格式不正确: ${SERVER_VERSION}"
+            echo "请使用类似 v3.8.0 的格式"
+            exit 1
+          fi
+          
+          # 尝试克隆指定版本
+          if ! git clone --depth 1 --branch ${SERVER_VERSION} https://github.com/${OPENIM_SERVER_REPO}.git openim-server; then
+            echo "❌ 错误: 无法找到版本 ${SERVER_VERSION}"
+            echo "正在获取可用的标签..."
+            git ls-remote --tags https://github.com/${OPENIM_SERVER_REPO}.git | head -10
+            exit 1
+          fi
+          
+          cp dockerfiles/anolis/Dockerfile.openim-server openim-server/Dockerfile
+
+      - name: 构建并推送OpenIM Server镜像
+        uses: docker/build-push-action@v5
+        with:
+          context: ./openim-server
+          file: ./openim-server/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:${{ needs.check-server-updates.outputs.server_version }}-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:latest-anolis
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=OpenIM Server on Anolis OS 8.10
+            org.opencontainers.image.description=OpenIM Server built on Anolis OS 8.10
+            org.opencontainers.image.version=${{ needs.check-server-updates.outputs.server_version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  update-server-versions:
+    needs: [check-server-updates, build-server]
+    if: always() && needs.check-server-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 更新Server版本文件
+        run: |
+          echo "server=${{ needs.check-server-updates.outputs.server_version }}" > server-versions.txt
+
+      - name: 更新环境配置文件
+        run: |
+          # 使更新脚本可执行
+          chmod +x scripts/update-env.sh
+          
+          # 更新Server版本
+          ./scripts/update-env.sh update-var OPENIM_SERVER_VERSION "${{ needs.check-server-updates.outputs.server_version }}-anolis"
+          
+          echo "✅ 环境配置文件已更新"
+
+      - name: 提交版本更新
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add server-versions.txt .env
+          git commit -m "🚀 更新OpenIM Server版本到 ${{ needs.check-server-updates.outputs.server_version }}" || exit 0
+          git push
+
+      - name: 构建总结
+        run: |
+          echo "🎉 OpenIM Server 镜像构建完成！"
+          echo "📦 构建的镜像:"
+          echo "  🚀 Server: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:${{ needs.check-server-updates.outputs.server_version }}-anolis"
+          echo ""
+          echo "💡 Chat镜像请使用私有构建工作流单独构建" 

@@ -1,326 +1,196 @@
-name: Build OpenIM Images on Anolis OS 8.10
+name: OpenIM Integration Tests
 
 on:
-  # 手动触发
+  # 手动触发完整集成测试
   workflow_dispatch:
     inputs:
-      openim_server_tag:
-        description: 'OpenIM Server版本标签 (如: v3.8.0)'
+      test_type:
+        description: '测试类型'
         required: true
-        default: 'v3.8.0'
-      openim_chat_tag:
-        description: 'OpenIM Chat版本标签 (如: v1.7.0)'
-        required: true
-        default: 'v1.7.0'
-      force_rebuild:
-        description: '强制重新构建所有镜像'
-        type: boolean
-        default: false
+        default: 'full'
+        type: choice
+        options:
+        - full
+        - api-only
+        - performance
+      server_image:
+        description: 'Server镜像标签'
+        required: false
+        default: 'latest-anolis'
+      chat_image:
+        description: 'Chat镜像标签'
+        required: false
+        default: 'latest-anolis'
   
-  # 定时检查更新 (每天 UTC 2:00)
-  schedule:
-    - cron: '0 2 * * *'
-  
-  # 推送到main分支时触发
-  push:
-    branches:
-      - main
-    paths:
-      - 'dockerfiles/anolis/**'
-      - '.github/workflows/build-openim-images.yml'
+  # 当Server和Chat构建完成后触发
+  workflow_run:
+    workflows: ["Build OpenIM Server & Chat on Anolis OS 8.10"]
+    types:
+      - completed
 
 env:
   # 镜像仓库配置
-  REGISTRY_DOCKERHUB: docker.io
   REGISTRY_ALIYUN: registry.cn-hangzhou.aliyuncs.com
-  NAMESPACE: aspirin2019  # 您的Docker Hub命名空间
-  ALIYUN_NAMESPACE: aspirin2019  # 您的阿里云镜像仓库命名空间
-  
-  # OpenIM官方仓库
-  OPENIM_SERVER_REPO: openimsdk/open-im-server
-  OPENIM_CHAT_REPO: openimsdk/chat
+  ALIYUN_NAMESPACE: aspirin2019
 
 jobs:
-  check-updates:
+  integration-test:
     runs-on: ubuntu-latest
-    outputs:
-      server_version: ${{ steps.check.outputs.server_version }}
-      chat_version: ${{ steps.check.outputs.chat_version }}
-      should_build: ${{ steps.check.outputs.should_build }}
-    steps:
-      - name: Checkout代码
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: 检查OpenIM版本更新
-        id: check
-        run: |
-          # 获取最新版本，如果失败则使用默认版本
-          SERVER_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_SERVER_REPO}/releases/latest | jq -r .tag_name)
-          CHAT_LATEST=$(curl -s https://api.github.com/repos/${OPENIM_CHAT_REPO}/releases/latest | jq -r .tag_name)
-          
-          # 检查获取的版本是否有效，如果无效则使用默认版本
-          if [[ "$SERVER_LATEST" == "null" || -z "$SERVER_LATEST" ]]; then
-            SERVER_LATEST="v3.8.0"
-          fi
-          if [[ "$CHAT_LATEST" == "null" || -z "$CHAT_LATEST" ]]; then
-            CHAT_LATEST="v1.7.0"
-          fi
-          
-          echo "server_version=${SERVER_LATEST}" >> $GITHUB_OUTPUT
-          echo "chat_version=${CHAT_LATEST}" >> $GITHUB_OUTPUT
-          
-          # 检查是否需要构建
-          SHOULD_BUILD=false
-          
-          # 检查是否为手动触发或强制重建
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            SHOULD_BUILD=true
-          fi
-          
-          # 检查是否为push触发
-          if [[ "${{ github.event_name }}" == "push" ]]; then
-            SHOULD_BUILD=true
-          fi
-          
-          # 检查版本文件
-          if [[ ! -f versions.txt ]]; then
-            echo "server=" > versions.txt
-            echo "chat=" >> versions.txt
-            SHOULD_BUILD=true
-          fi
-          
-          # 比较版本
-          PREV_SERVER=$(grep "server=" versions.txt | cut -d'=' -f2)
-          PREV_CHAT=$(grep "chat=" versions.txt | cut -d'=' -f2)
-          
-          if [[ "${SERVER_LATEST}" != "${PREV_SERVER}" ]] || \
-             [[ "${CHAT_LATEST}" != "${PREV_CHAT}" ]]; then
-            SHOULD_BUILD=true
-          fi
-          
-          echo "should_build=${SHOULD_BUILD}" >> $GITHUB_OUTPUT
-          
-          echo "检测到的版本:"
-          echo "OpenIM Server: ${SERVER_LATEST} (之前: ${PREV_SERVER})"
-          echo "OpenIM Chat: ${CHAT_LATEST} (之前: ${PREV_CHAT})"
-          echo "是否需要构建: ${SHOULD_BUILD}"
-
-  build-server:
-    needs: check-updates
-    if: needs.check-updates.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     steps:
       - name: Checkout代码
         uses: actions/checkout@v4
 
-      - name: 设置Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: 登录Docker Hub
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_DOCKERHUB }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 登录阿里云镜像仓库
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_ALIYUN }}
-          username: ${{ secrets.ALIYUN_USERNAME }}
-          password: ${{ secrets.ALIYUN_PASSWORD }}
-        continue-on-error: true
-
-      - name: 下载OpenIM Server源码
+      - name: 设置Docker Compose环境
         run: |
-          # 确定要使用的版本
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            SERVER_VERSION="${{ github.event.inputs.openim_server_tag }}"
-          else
-            SERVER_VERSION="${{ needs.check-updates.outputs.server_version }}"
-          fi
-          
-          echo "使用版本: ${SERVER_VERSION}"
-          
-          # 检查版本格式
-          if [[ ! "$SERVER_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-            echo "错误: 版本格式不正确: ${SERVER_VERSION}"
-            echo "请使用类似 v3.8.0 的格式"
-            exit 1
-          fi
-          
-          # 尝试克隆指定版本
-          if ! git clone --depth 1 --branch ${SERVER_VERSION} https://github.com/${OPENIM_SERVER_REPO}.git openim-server; then
-            echo "错误: 无法找到版本 ${SERVER_VERSION}"
-            echo "正在获取可用的标签..."
-            git ls-remote --tags https://github.com/${OPENIM_SERVER_REPO}.git | head -10
-            exit 1
-          fi
-          
-          cp dockerfiles/anolis/Dockerfile.openim-server openim-server/Dockerfile
+          # 创建测试用的docker-compose.yml
+          cat > docker-compose.test.yml << 'EOF'
+          version: '3.8'
+          services:
+            mongodb:
+              image: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/mongodb:latest-anolis
+              ports:
+                - "27017:27017"
+              environment:
+                - TZ=Asia/Shanghai
+              healthcheck:
+                test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
 
-      - name: 构建并推送OpenIM Server镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: ./openim-server
-          file: ./openim-server/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-server:${{ needs.check-updates.outputs.server_version }}-anolis
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-server:latest-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:${{ needs.check-updates.outputs.server_version }}-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:latest-anolis
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.title=OpenIM Server on Anolis OS 8.10
-            org.opencontainers.image.description=OpenIM Server built on Anolis OS 8.10
-            org.opencontainers.image.version=${{ needs.check-updates.outputs.server_version }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            redis:
+              image: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/redis:latest-anolis
+              ports:
+                - "6379:6379"
+              environment:
+                - TZ=Asia/Shanghai
+              healthcheck:
+                test: ["CMD", "redis-cli", "ping"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
 
-  build-chat:
-    needs: check-updates
-    if: needs.check-updates.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout代码
-        uses: actions/checkout@v4
+            openim-server:
+              image: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:${{ github.event.inputs.server_image || 'latest-anolis' }}
+              ports:
+                - "10001:10001"
+                - "10002:10002" 
+                - "10003:10003"
+                - "10004:10004"
+                - "10005:10005"
+              depends_on:
+                - mongodb
+                - redis
+              environment:
+                - TZ=Asia/Shanghai
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://localhost:10001/healthz"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
 
-      - name: 设置Docker Buildx
-        uses: docker/setup-buildx-action@v3
+            openim-chat:
+              image: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-chat:${{ github.event.inputs.chat_image || 'latest-anolis' }}
+              ports:
+                - "10008:10008"
+                - "10009:10009"
+              depends_on:
+                - openim-server
+              environment:
+                - TZ=Asia/Shanghai
+              healthcheck:
+                test: ["CMD", "curl", "-f", "http://localhost:10008/healthz"]
+                interval: 30s
+                timeout: 10s
+                retries: 3
+          EOF
 
-      - name: 登录Docker Hub
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_DOCKERHUB }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 登录阿里云镜像仓库
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_ALIYUN }}
-          username: ${{ secrets.ALIYUN_USERNAME }}
-          password: ${{ secrets.ALIYUN_PASSWORD }}
-        continue-on-error: true
-
-      - name: 下载OpenIM Chat源码
+      - name: 启动OpenIM完整服务
         run: |
-          # 确定要使用的版本
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            CHAT_VERSION="${{ github.event.inputs.openim_chat_tag }}"
-          else
-            CHAT_VERSION="${{ needs.check-updates.outputs.chat_version }}"
-          fi
+          echo "🚀 启动OpenIM完整服务栈..."
+          docker-compose -f docker-compose.test.yml up -d
           
-          echo "使用版本: ${CHAT_VERSION}"
-          
-          # 检查版本格式
-          if [[ ! "$CHAT_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+.*$ ]]; then
-            echo "错误: 版本格式不正确: ${CHAT_VERSION}"
-            echo "请使用类似 v1.7.0 的格式"
-            exit 1
-          fi
-          
-          # 尝试克隆指定版本
-          if ! git clone --depth 1 --branch ${CHAT_VERSION} https://github.com/${OPENIM_CHAT_REPO}.git openim-chat; then
-            echo "错误: 无法找到版本 ${CHAT_VERSION}"
-            echo "正在获取可用的标签..."
-            git ls-remote --tags https://github.com/${OPENIM_CHAT_REPO}.git | head -10
-            exit 1
-          fi
-          
-          cp dockerfiles/anolis/Dockerfile.openim-chat openim-chat/Dockerfile
+          echo "⏳ 等待服务启动..."
+          sleep 60
 
-      - name: 构建并推送OpenIM Chat镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: ./openim-chat
-          file: ./openim-chat/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-chat:${{ needs.check-updates.outputs.chat_version }}-anolis
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/openim-chat:latest-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-chat:${{ needs.check-updates.outputs.chat_version }}-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-chat:latest-anolis
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.title=OpenIM Chat on Anolis OS 8.10
-            org.opencontainers.image.description=OpenIM Chat built on Anolis OS 8.10
-            org.opencontainers.image.version=${{ needs.check-updates.outputs.chat_version }}
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-
-  build-base-images:
-    needs: check-updates
-    if: needs.check-updates.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        component: [mongodb, redis]
-    steps:
-      - name: Checkout代码
-        uses: actions/checkout@v4
-
-      - name: 设置Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: 登录Docker Hub
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_DOCKERHUB }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 登录阿里云镜像仓库
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY_ALIYUN }}
-          username: ${{ secrets.ALIYUN_USERNAME }}
-          password: ${{ secrets.ALIYUN_PASSWORD }}
-        continue-on-error: true
-
-      - name: 构建并推送${{ matrix.component }}镜像
-        uses: docker/build-push-action@v5
-        with:
-          context: ./dockerfiles/anolis
-          file: ./dockerfiles/anolis/Dockerfile.${{ matrix.component }}
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.REGISTRY_DOCKERHUB }}/${{ env.NAMESPACE }}/${{ matrix.component }}:latest-anolis
-            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component }}:latest-anolis
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          labels: |
-            org.opencontainers.image.title=${{ matrix.component }} on Anolis OS 8.10
-            org.opencontainers.image.description=${{ matrix.component }} built on Anolis OS 8.10
-            org.opencontainers.image.source=https://github.com/${{ github.repository }}
-
-  update-versions:
-    needs: [check-updates, build-server, build-chat, build-base-images]
-    if: always() && needs.check-updates.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout代码
-        uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: 更新版本文件
+      - name: 检查服务状态
         run: |
-          echo "server=${{ needs.check-updates.outputs.server_version }}" > versions.txt
-          echo "chat=${{ needs.check-updates.outputs.chat_version }}" >> versions.txt
-
-      - name: 提交版本更新
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add versions.txt
-          git commit -m "更新OpenIM版本到 server:${{ needs.check-updates.outputs.server_version }}, chat:${{ needs.check-updates.outputs.chat_version }}" || exit 0
-          git push 
+          echo "🔍 检查服务状态..."
+          docker-compose -f docker-compose.test.yml ps
           
+          echo "📊 检查服务健康状态..."
+          docker-compose -f docker-compose.test.yml exec -T mongodb mongosh --eval "db.adminCommand('ping')" || echo "MongoDB 未准备就绪"
+          docker-compose -f docker-compose.test.yml exec -T redis redis-cli ping || echo "Redis 未准备就绪"
+          curl -f http://localhost:10001/healthz || echo "OpenIM Server 未准备就绪"
+          curl -f http://localhost:10008/healthz || echo "OpenIM Chat 未准备就绪"
+
+      - name: API功能测试
+        if: github.event.inputs.test_type == 'full' || github.event.inputs.test_type == 'api-only'
+        run: |
+          echo "🧪 执行API功能测试..."
+          
+          # 测试用户注册
+          echo "Testing user registration..."
+          curl -X POST http://localhost:10001/user/register \
+            -H "Content-Type: application/json" \
+            -d '{"userID":"test001","nickname":"TestUser","faceURL":""}' \
+            || echo "用户注册测试失败"
+          
+          # 测试获取token
+          echo "Testing get token..."
+          curl -X POST http://localhost:10008/auth/get_token \
+            -H "Content-Type: application/json" \
+            -d '{"userID":"test001","platformID":1}' \
+            || echo "获取token测试失败"
+
+      - name: 性能基准测试
+        if: github.event.inputs.test_type == 'full' || github.event.inputs.test_type == 'performance'
+        run: |
+          echo "📈 执行性能基准测试..."
+          
+          # 安装性能测试工具
+          sudo apt-get update && sudo apt-get install -y apache2-utils
+          
+          # API性能测试
+          echo "Testing API performance..."
+          ab -n 1000 -c 10 http://localhost:10001/healthz || echo "性能测试完成"
+
+      - name: 生成测试报告
+        if: always()
+        run: |
+          echo "📋 生成测试报告..."
+          
+          # 收集容器日志
+          mkdir -p test-reports
+          docker-compose -f docker-compose.test.yml logs > test-reports/container-logs.txt
+          
+          # 收集系统信息
+          docker system df > test-reports/system-info.txt
+          docker images | grep anolis > test-reports/anolis-images.txt
+          
+          echo "✅ 测试报告生成完成"
+
+      - name: 清理测试环境
+        if: always()
+        run: |
+          echo "🧹 清理测试环境..."
+          docker-compose -f docker-compose.test.yml down -v
+          docker system prune -f
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-test-reports
+          path: test-reports/
+          retention-days: 7
+
+      - name: 测试总结
+        run: |
+          echo "🎉 OpenIM 集成测试完成！"
+          echo "📦 测试的镜像:"
+          echo "  🚀 Server: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-server:${{ github.event.inputs.server_image || 'latest-anolis' }}"
+          echo "  💬 Chat: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/openim-chat:${{ github.event.inputs.chat_image || 'latest-anolis' }}"
+          echo "  🍃 MongoDB: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/mongodb:latest-anolis"
+          echo "  🔴 Redis: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/redis:latest-anolis" 

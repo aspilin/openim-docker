@@ -1,0 +1,250 @@
+name: Build Base Components on Anolis OS 8.10
+
+on:
+  # 手动触发
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: '强制重新构建所有基础组件'
+        type: boolean
+        default: false
+      components:
+        description: '选择要构建的组件 (用逗号分隔，如: mongodb,redis)'
+        required: false
+        default: 'mongodb,redis'
+  
+  # 定时检查更新 (每周一 UTC 3:00)
+  schedule:
+    - cron: '0 3 * * 1'
+  
+  # 推送到main分支时触发
+  push:
+    branches:
+      - main
+    paths:
+      - 'dockerfiles/anolis/Dockerfile.mongodb'
+      - 'dockerfiles/anolis/Dockerfile.redis'
+      - '.github/workflows/build-base-components.yml'
+
+env:
+  # 镜像仓库配置
+  REGISTRY_ALIYUN: registry.cn-hangzhou.aliyuncs.com
+  ALIYUN_NAMESPACE: aspirin2019  # 公共镜像命名空间
+  
+  # OpenIM官方仓库
+  OPENIM_SERVER_REPO: openimsdk/open-im-server
+
+jobs:
+  check-base-component-updates:
+    runs-on: ubuntu-latest
+    outputs:
+      mongodb_version: ${{ steps.check.outputs.mongodb_version }}
+      redis_version: ${{ steps.check.outputs.redis_version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+      components_to_build: ${{ steps.check.outputs.components_to_build }}
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载官方docker-compose.yml文件
+        run: |
+          echo "📥 下载官方Server仓库的docker-compose.yml..."
+          curl -s https://raw.githubusercontent.com/${OPENIM_SERVER_REPO}/main/docker-compose.yml -o official-docker-compose.yml
+          
+          if [[ ! -f official-docker-compose.yml ]]; then
+            echo "❌ 无法下载官方docker-compose.yml文件"
+            exit 1
+          fi
+          
+          echo "✅ 成功下载官方docker-compose.yml"
+
+      - name: 检查基础组件版本更新
+        id: check
+        run: |
+          # 从官方docker-compose.yml中提取版本信息
+          MONGODB_VERSION=$(grep -A 5 "mongodb:" official-docker-compose.yml | grep "image:" | sed 's/.*mongo:\([^[:space:]]*\).*/\1/' | head -1)
+          REDIS_VERSION=$(grep -A 5 "redis:" official-docker-compose.yml | grep "image:" | sed 's/.*redis:\([^[:space:]]*\).*/\1/' | head -1)
+          
+          # 如果提取失败，使用默认版本
+          if [[ -z "$MONGODB_VERSION" || "$MONGODB_VERSION" == "latest" ]]; then
+            MONGODB_VERSION="7.0.4"
+          fi
+          if [[ -z "$REDIS_VERSION" || "$REDIS_VERSION" == "latest" ]]; then
+            REDIS_VERSION="7.2.3"
+          fi
+          
+          echo "mongodb_version=${MONGODB_VERSION}" >> $GITHUB_OUTPUT
+          echo "redis_version=${REDIS_VERSION}" >> $GITHUB_OUTPUT
+          
+          # 检查是否需要构建
+          SHOULD_BUILD=false
+          COMPONENTS_TO_BUILD=""
+          
+          # 检查是否为手动触发或强制重建
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            SHOULD_BUILD=true
+            if [[ -n "${{ github.event.inputs.components }}" ]]; then
+              COMPONENTS_TO_BUILD="${{ github.event.inputs.components }}"
+            else
+              COMPONENTS_TO_BUILD="mongodb,redis"
+            fi
+          fi
+          
+          # 检查是否为push触发
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            SHOULD_BUILD=true
+            COMPONENTS_TO_BUILD="mongodb,redis"
+          fi
+          
+          # 检查版本文件
+          if [[ ! -f base-versions.txt ]]; then
+            echo "mongodb=" > base-versions.txt
+            echo "redis=" >> base-versions.txt
+            SHOULD_BUILD=true
+            COMPONENTS_TO_BUILD="mongodb,redis"
+          fi
+          
+          # 比较版本
+          if [[ -f base-versions.txt ]]; then
+            PREV_MONGODB=$(grep "mongodb=" base-versions.txt | cut -d'=' -f2)
+            PREV_REDIS=$(grep "redis=" base-versions.txt | cut -d'=' -f2)
+            
+            if [[ "${MONGODB_VERSION}" != "${PREV_MONGODB}" ]]; then
+              SHOULD_BUILD=true
+              if [[ -z "$COMPONENTS_TO_BUILD" ]]; then
+                COMPONENTS_TO_BUILD="mongodb"
+              elif [[ "$COMPONENTS_TO_BUILD" != *"mongodb"* ]]; then
+                COMPONENTS_TO_BUILD="${COMPONENTS_TO_BUILD},mongodb"
+              fi
+            fi
+            
+            if [[ "${REDIS_VERSION}" != "${PREV_REDIS}" ]]; then
+              SHOULD_BUILD=true
+              if [[ -z "$COMPONENTS_TO_BUILD" ]]; then
+                COMPONENTS_TO_BUILD="redis"
+              elif [[ "$COMPONENTS_TO_BUILD" != *"redis"* ]]; then
+                COMPONENTS_TO_BUILD="${COMPONENTS_TO_BUILD},redis"
+              fi
+            fi
+          fi
+          
+          echo "should_build=${SHOULD_BUILD}" >> $GITHUB_OUTPUT
+          echo "components_to_build=${COMPONENTS_TO_BUILD}" >> $GITHUB_OUTPUT
+          
+          echo "🔍 检测到的版本:"
+          echo "MongoDB: ${MONGODB_VERSION} (之前: ${PREV_MONGODB:-未知})"
+          echo "Redis: ${REDIS_VERSION} (之前: ${PREV_REDIS:-未知})"
+          echo "是否需要构建: ${SHOULD_BUILD}"
+          echo "需要构建的组件: ${COMPONENTS_TO_BUILD}"
+
+  build-base-components:
+    needs: check-base-component-updates
+    if: needs.check-base-component-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [mongodb, redis]
+    steps:
+      - name: 检查是否需要构建此组件
+        id: should_build_component
+        run: |
+          COMPONENTS="${{ needs.check-base-component-updates.outputs.components_to_build }}"
+          if [[ "$COMPONENTS" == *"${{ matrix.component }}"* ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            echo "✅ 需要构建 ${{ matrix.component }}"
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+            echo "⏭️ 跳过构建 ${{ matrix.component }}"
+          fi
+
+      - name: Checkout代码
+        if: steps.should_build_component.outputs.should_build == 'true'
+        uses: actions/checkout@v4
+
+      - name: 设置Docker Buildx
+        if: steps.should_build_component.outputs.should_build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录阿里云镜像仓库
+        if: steps.should_build_component.outputs.should_build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_ALIYUN }}
+          username: ${{ secrets.ALIYUN_USERNAME }}
+          password: ${{ secrets.ALIYUN_PASSWORD }}
+
+      - name: 更新Dockerfile中的版本
+        if: steps.should_build_component.outputs.should_build == 'true'
+        run: |
+          DOCKERFILE="dockerfiles/anolis/Dockerfile.${{ matrix.component }}"
+          
+          if [[ "${{ matrix.component }}" == "mongodb" ]]; then
+            VERSION="${{ needs.check-base-component-updates.outputs.mongodb_version }}"
+            # 更新MongoDB版本
+            sed -i "s/ENV MONGO_VERSION=.*/ENV MONGO_VERSION=${VERSION}/" $DOCKERFILE
+            echo "📝 更新MongoDB版本到 ${VERSION}"
+          elif [[ "${{ matrix.component }}" == "redis" ]]; then
+            VERSION="${{ needs.check-base-component-updates.outputs.redis_version }}"
+            # 更新Redis版本  
+            sed -i "s/ENV REDIS_VERSION=.*/ENV REDIS_VERSION=${VERSION}/" $DOCKERFILE
+            echo "📝 更新Redis版本到 ${VERSION}"
+          fi
+
+      - name: 构建并推送${{ matrix.component }}镜像
+        if: steps.should_build_component.outputs.should_build == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dockerfiles/anolis
+          file: ./dockerfiles/anolis/Dockerfile.${{ matrix.component }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component }}:${{ matrix.component == 'mongodb' && needs.check-base-component-updates.outputs.mongodb_version || needs.check-base-component-updates.outputs.redis_version }}-anolis
+            ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/${{ matrix.component }}:latest-anolis
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.title=${{ matrix.component }} on Anolis OS 8.10
+            org.opencontainers.image.description=${{ matrix.component }} built on Anolis OS 8.10
+            org.opencontainers.image.version=${{ matrix.component == 'mongodb' && needs.check-base-component-updates.outputs.mongodb_version || needs.check-base-component-updates.outputs.redis_version }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  update-base-versions:
+    needs: [check-base-component-updates, build-base-components]
+    if: always() && needs.check-base-component-updates.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout代码
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 更新基础组件版本文件
+        run: |
+          echo "mongodb=${{ needs.check-base-component-updates.outputs.mongodb_version }}" > base-versions.txt
+          echo "redis=${{ needs.check-base-component-updates.outputs.redis_version }}" >> base-versions.txt
+
+      - name: 提交版本更新
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add base-versions.txt
+          git commit -m "🔧 更新基础组件版本到 mongodb:${{ needs.check-base-component-updates.outputs.mongodb_version }}, redis:${{ needs.check-base-component-updates.outputs.redis_version }}" || exit 0
+          git push
+
+      - name: 构建总结
+        run: |
+          echo "🎉 基础组件镜像构建完成！"
+          echo "📦 构建的镜像:"
+          COMPONENTS="${{ needs.check-base-component-updates.outputs.components_to_build }}"
+          if [[ "$COMPONENTS" == *"mongodb"* ]]; then
+            echo "  🍃 MongoDB: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/mongodb:${{ needs.check-base-component-updates.outputs.mongodb_version }}-anolis"
+          fi
+          if [[ "$COMPONENTS" == *"redis"* ]]; then
+            echo "  🔴 Redis: ${{ env.REGISTRY_ALIYUN }}/${{ env.ALIYUN_NAMESPACE }}/redis:${{ needs.check-base-component-updates.outputs.redis_version }}-anolis"
+          fi
+          echo ""
+          echo "📅 下次检查时间: 每周一 UTC 3:00"
+          echo "🔄 监控来源: 官方 ${OPENIM_SERVER_REPO} docker-compose.yml" 
