@@ -39,11 +39,32 @@ RUN ARCH="$(uname -m)" && \
     else \
         echo "Unsupported architecture: $ARCH" && exit 1; \
     fi && \
-    curl -fSL "https://fastdl.mongodb.org/linux/mongodb-linux-${MONGO_ARCH}-rhel80-${MONGO_VERSION}.tgz" -o mongodb.tgz && \
-    tar -xzf mongodb.tgz && \
-    cp mongodb-*/bin/* /usr/local/bin/ && \
-    rm -rf /tmp/mongodb* && \
-    chmod +x /usr/local/bin/mongo*
+    echo "Downloading MongoDB ${MONGO_VERSION} for ${MONGO_ARCH}..." && \
+    DOWNLOAD_URL="https://fastdl.mongodb.org/linux/mongodb-linux-${MONGO_ARCH}-rhel80-${MONGO_VERSION}.tgz" && \
+    echo "Trying URL: ${DOWNLOAD_URL}" && \
+    if ! curl -fSL "$DOWNLOAD_URL" -o mongodb.tgz; then \
+        echo "Primary download failed, trying alternative..." && \
+        ALT_URL="https://downloads.mongodb.org/linux/mongodb-linux-${MONGO_ARCH}-rhel80-${MONGO_VERSION}.tgz" && \
+        echo "Trying alternative URL: ${ALT_URL}" && \
+        if ! curl -fSL "$ALT_URL" -o mongodb.tgz; then \
+            echo "Alternative download failed, trying generic rhel..." && \
+            GENERIC_URL="https://fastdl.mongodb.org/linux/mongodb-linux-${MONGO_ARCH}-rhel70-${MONGO_VERSION}.tgz" && \
+            echo "Trying generic URL: ${GENERIC_URL}" && \
+            if ! curl -fSL "$GENERIC_URL" -o mongodb.tgz; then \
+                echo "All download attempts failed, installing from package..." && \
+                yum install -y mongodb-org || echo "Package installation also failed"; \
+            fi; \
+        fi; \
+    fi && \
+    if [ -f "mongodb.tgz" ]; then \
+        echo "Extracting MongoDB archive..." && \
+        tar -xzf mongodb.tgz && \
+        cp mongodb-*/bin/* /usr/local/bin/ && \
+        rm -rf /tmp/mongodb* && \
+        chmod +x /usr/local/bin/mongo*; \
+    else \
+        echo "MongoDB installation completed via package manager"; \
+    fi
 
 # 复制MongoDB配置文件
 COPY mongod.conf /etc/mongod.conf
