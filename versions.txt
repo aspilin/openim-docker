@@ -1,2 +1,2 @@
-server=v3.8.3-patch.8
+server=v3.8.0
 chat=v1.8.4-patch.2
